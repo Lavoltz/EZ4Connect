@@ -81,6 +81,8 @@ private:
 
     void deleteCurrentProfile();
 
+    void gracefullyQuit();
+
     struct {
         QString ui_version, ui_latest;
         QString core_version, core_latest;

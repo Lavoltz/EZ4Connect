@@ -59,7 +59,7 @@ MainWindow::MainWindow(QWidget *parent) :
 
 
     // 文件-退出
-    connect(ui->exitAction, &QAction::triggered, QApplication::instance(), &QApplication::quit);
+    connect(ui->exitAction, &QAction::triggered, this, &MainWindow::gracefullyQuit);
 
     // 文件-设置
     connect(ui->settingAction, &QAction::triggered, this,
@@ -403,7 +403,7 @@ void MainWindow::setupTrayIcon()
         setWindowState(Qt::WindowState::WindowActive);
         setFocus();
     });
-    connect(trayCloseAction, &QAction::triggered, QApplication::instance(), &QApplication::quit);
+    connect(trayCloseAction, &QAction::triggered, this, &MainWindow::gracefullyQuit);
 }
 
 void MainWindow::setupProfileMenu()
@@ -769,6 +769,19 @@ void MainWindow::cleanUpWhenQuit()
     if (isSystemProxySet)
     {
         Utils::clearSystemProxy();
+    }
+}
+
+void MainWindow::gracefullyQuit()
+{
+    if (isZjuConnectLinked)
+    {
+        connect(zjuConnectController, &ZjuConnectController::finished, qApp, QApplication::quit);
+        ui->pushButton1->click();
+    }
+    else
+    {
+        qApp->quit();
     }
 }
 
