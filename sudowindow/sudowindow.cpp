@@ -1,14 +1,11 @@
-#include "loginwindow.h"
+#include "sudowindow.h"
 
-#include "utils/utils.h"
-
-#include <QMessageBox>
 #include <QPushButton>
 #include <QKeyEvent>
 
-LoginWindow::LoginWindow(QWidget *parent)
+SudoWindow::SudoWindow(QWidget *parent)
 	: QDialog(parent),
-	ui(new Ui::LoginWindow)
+	ui(new Ui::SudoWindow)
 {
 	ui->setupUi(this);
 
@@ -18,9 +15,7 @@ LoginWindow::LoginWindow(QWidget *parent)
 	connect(ui->buttonBox->button(QDialogButtonBox::Ok), &QPushButton::clicked,
 		[&]()
 		{
-			if (!Utils::credentialCheck(ui->usernameLineEdit->text(), ui->passwordLineEdit->text()))
-				return;
-			emit login(ui->usernameLineEdit->text(), ui->passwordLineEdit->text(), ui->saveLoginDetailCheckBox->isChecked());
+			emit sudo(ui->passwordLineEdit->text(), ui->savePasswordCheckBox->isChecked());
 			emit accept();
 		}
 	);
@@ -33,18 +28,12 @@ LoginWindow::LoginWindow(QWidget *parent)
 	);
 }
 
-LoginWindow::~LoginWindow()
+SudoWindow::~SudoWindow()
 {
 	delete ui;
 }
 
-void LoginWindow::setDetail(const QString& username, const QString& password)
-{
-	ui->usernameLineEdit->setText(username);
-	ui->passwordLineEdit->setText(password);
-}
-
-void LoginWindow::keyPressEvent(QKeyEvent *event)
+void SudoWindow::keyPressEvent(QKeyEvent *event)
 {
 	if (event->key() == Qt::Key_Enter || event->key() == Qt::Key_Return)
 		ui->buttonBox->button(QDialogButtonBox::Ok)->click();
@@ -53,4 +42,3 @@ void LoginWindow::keyPressEvent(QKeyEvent *event)
 	else
 		QDialog::keyPressEvent(event);
 }
-

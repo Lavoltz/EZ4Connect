@@ -7,11 +7,15 @@
 #include <QProcess>
 #include <QNetworkReply>
 #include <QSettings>
+#include <QPointer>
 
 #include "loginwindow/loginwindow.h"
-#include "extrasettingwindow/extrasettingwindow.h"
+#include "sudowindow/sudowindow.h"
+#include "ssologinwebview/ssologinwebview.h"
 #include "zjuconnectcontroller/zjuconnectcontroller.h"
 #include "settingwindow/settingwindow.h"
+#include "graphcaptchawindow/graphcaptchawindow.h"
+#include "utils/profilemanager.h"
 
 namespace Ui
 {
@@ -27,6 +31,8 @@ public:
 
     ~MainWindow() override;
 
+    void addLog(const QString &log);
+
 public slots:
 
     void cleanUpWhenQuit();
@@ -35,8 +41,12 @@ signals:
 
     void SetModeFinished();
 
+    void WriteToProcess(const QByteArray &data);
+
 protected:
     void closeEvent(QCloseEvent *e) override;
+
+    void changeEvent(QEvent *event) override;
 
 private:
     void checkUpdate();
@@ -45,7 +55,7 @@ private:
 
     void clearLog();
 
-    void addLog(const QString &log);
+    void resetZjuConnectUi();
 
     void showNotification(
         const QString &title,
@@ -57,6 +67,22 @@ private:
 
     void updateVersionInfo();
 
+    void setupTrayIcon();
+
+    void setupProfileMenu();
+
+    void refreshProfileMenu();
+
+    bool switchProfile(const QString &profileId);
+
+    void createProfile();
+
+    void renameCurrentProfile();
+
+    void deleteCurrentProfile();
+
+    void gracefullyQuit();
+
     struct {
         QString ui_version, ui_latest;
         QString core_version, core_latest;
@@ -65,22 +91,27 @@ private:
     Ui::MainWindow *ui;
     QSystemTrayIcon *trayIcon;
     QMenu *trayMenu;
+    QMenu *trayProfileMenu;
+    QAction *trayConnectAction;
     QAction *trayShowAction;
     QAction *trayCloseAction;
-    ZjuConnectController *zjuConnectController;
+    QAction *newProfileAction;
+    QAction *renameProfileAction;
+    QAction *deleteProfileAction;
+    ZjuConnectController *zjuConnectController = nullptr;
     QNetworkAccessManager *checkUpdateNAM;
     QNetworkAccessManager *checkCoreUpdateNAM;
     QSettings *settings;
-    QProcess *process;
-    QProcess *processForL2tp;
-    QProcess *processForL2tpCheck;
-    QProcess *processForWebLogin;
-    QTimer *l2tpCheckTimer;
+    ProfileManager *profileManager;
+    QString currentProfileId;
 
     QObject *diagnosisContext;
 
-    SettingWindow *settingWindow;
-    LoginWindow *login_window;
+    QPointer<SettingWindow> settingWindow;
+    QPointer<LoginWindow> loginWindow;
+    QPointer<SudoWindow> sudoWindow;
+    QPointer<SsoLoginWebView> ssoLoginWebView;
+    QPointer<GraphCaptchaWindow> graphCaptchaWindow;
 
     bool isFirstTimeSetMode;
 

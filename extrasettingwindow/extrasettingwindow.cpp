@@ -7,14 +7,10 @@ ExtraSettingWindow::ExtraSettingWindow(QDialog *parent) :
 {
     ui->setupUi(this);
 
-    setWindowIcon(QIcon(QPixmap(":/resource/icon.png").scaled(
-        512, 512, Qt::KeepAspectRatio, Qt::SmoothTransformation
-    )));
-
     setWindowModality(Qt::WindowModal);
     setAttribute(Qt::WA_DeleteOnClose);
 
-    connect(ui->buttonBox, &QDialogButtonBox::accepted,
+    connect(this, &QDialog::accepted,
             [&]()
             {
                 QStringList tcpPortForwardingList;

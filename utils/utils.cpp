@@ -1,4 +1,6 @@
 #include <QMessageBox>
+#include <QInputDialog>
+#include <QLineEdit>
 #include <QApplication>
 #include <QNetworkInterface>
 #include <QTextCodec>
@@ -7,10 +9,44 @@
 #include <QtSystemDetection>
 #include <QDir>
 #include <QFileInfo>
+#include <QCoreApplication>
+#include <QStandardPaths>
+#if defined(Q_OS_WIN)
+#include <windows.h>
+#include <shellapi.h>
+#elif defined(Q_OS_UNIX)
+#include <unistd.h>
+#endif
 
 #include "utils.h"
+#include "profilemanager.h"
 
-QString Utils::ConsoleOutputToQString(const QByteArray &byteArray)
+namespace
+{
+QString profileIdFromConfigPath(const QString &configPath)
+{
+    QFileInfo info(configPath);
+    if (!info.exists() || info.suffix() != "ini")
+    {
+        return "custom";
+    }
+
+    if (info.fileName() == "state.ini")
+    {
+        return "custom";
+    }
+
+    QDir parentDir = info.dir();
+    if (parentDir.dirName() != "profiles")
+    {
+        return "custom";
+    }
+
+    return info.baseName();
+}
+}
+
+QString Utils::consoleOutputToQString(const QByteArray &byteArray)
 {
     static QString codeName = "";
     if (codeName == "UTF-8")
@@ -57,6 +93,28 @@ QString Utils::ConsoleOutputToQString(const QByteArray &byteArray)
     }
 }
 
+QString Utils::getArgValue(const QStringList &args, const QString &key)
+{
+    const QString prefix = key + "=";
+    for (int i = 0; i < args.size(); ++i)
+    {
+        const QString &arg = args.at(i);
+        if (arg == key)
+        {
+            if (i + 1 < args.size())
+            {
+                return args.at(i + 1);
+            }
+            return "";
+        }
+        if (arg.startsWith(prefix))
+        {
+            return arg.mid(prefix.size());
+        }
+    }
+    return "";
+}
+
 void Utils::setWidgetFixedWhenHidden(QWidget *widget)
 {
     QSizePolicy originPolicy = widget->sizePolicy();
@@ -71,7 +129,7 @@ void Utils::showAboutMessageBox(QWidget *parent)
     messageBox.setTextFormat(Qt::RichText);
     QString aboutText = QApplication::applicationDisplayName() + " " + QApplication::applicationVersion() +
                         "<br>改进的 ZJU-Connect 图形界面" +
-                        "<br>作者：<a href='https://github.com/PageChen04'>Page Chen</a>" +
+                        "<br>作者：<a href='https://github.com/chenx-dust'>Chenx Dust</a>" +
                         "<br>项目主页：<a href='https://github.com/" + REPO_NAME + "'>https://github.com/" + REPO_NAME + "</a>" +
                         "<br><br><b>致谢：</b>" +
                         "<br><br>ZJU-Connect-for-Windows" +
@@ -150,6 +208,72 @@ QString nativeAppPath()
     return QDir::toNativeSeparators(QCoreApplication::applicationFilePath());
 }
 
+bool Utils::isRunningAsAdmin()
+{
+#if defined(Q_OS_WIN)
+    BOOL isAdmin = FALSE;
+    PSID adminGroup = nullptr;
+    SID_IDENTIFIER_AUTHORITY ntAuthority = SECURITY_NT_AUTHORITY;
+
+    if (AllocateAndInitializeSid(&ntAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID,
+        DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &adminGroup))
+    {
+        CheckTokenMembership(nullptr, adminGroup, &isAdmin);
+        FreeSid(adminGroup);
+    }
+    return isAdmin;
+#elif defined(Q_OS_UNIX)
+    return geteuid() == 0;
+#else
+    return false;
+#endif
+}
+
+bool Utils::relaunchAsAdmin()
+{
+    QString program = QCoreApplication::applicationFilePath();
+    QStringList args = QCoreApplication::arguments();
+    if (!args.isEmpty())
+    {
+        args.removeFirst();
+    }
+
+    if (!args.contains("--connect"))
+    {
+        args << "--connect";
+    }
+
+#if defined(Q_OS_WIN)
+    QStringList quotedArgs;
+    for (const QString &arg : args)
+    {
+        if (arg.contains(' '))
+        {
+            quotedArgs << "\"" + arg + "\"";
+        }
+        else
+        {
+            quotedArgs << arg;
+        }
+    }
+    QString arguments = quotedArgs.join(" ");
+    HINSTANCE res = ShellExecuteW(
+        nullptr,
+        L"runas",
+        reinterpret_cast<LPCWSTR>(program.utf16()),
+        reinterpret_cast<LPCWSTR>(arguments.utf16()),
+        nullptr,
+        SW_SHOWNORMAL
+    );
+
+    return reinterpret_cast<INT_PTR>(res) > 32;
+#else
+    Q_UNUSED(program)
+    Q_UNUSED(args)
+    return false;
+#endif
+}
+
 void Utils::setAutoStart(bool enable)
 {
 #if defined(Q_OS_WINDOWS)
@@ -170,10 +294,9 @@ void Utils::setAutoStart(bool enable)
 #elif defined(Q_OS_MACOS)
     {
         QStringList args;
-        args << "-e tell application \"System Events\" to delete login item\"" + macOSAppBundleName() + "\"";
+        args << "-e" << "tell application \"System Events\" to delete login item \"" + macOSAppBundleName() + "\"";
         qDebug() << args;
 
-        // int result = QProcess::execute("osascript", args);
         QProcess process;
         process.start("osascript", args);
         process.waitForFinished();
@@ -194,7 +317,7 @@ void Utils::setAutoStart(bool enable)
     if (enable)
     {
         QStringList args;
-        args << "-e tell application \"System Events\" to make login item at end with properties {path:\"" +
+        args << "-e" << "tell application \"System Events\" to make login item at end with properties {path:\"" +
                     macOSAppBundlePath() + "\", hidden:false}";
         qDebug() << args;
 
@@ -215,7 +338,7 @@ void Utils::setAutoStart(bool enable)
         }
     }
 #elif defined(Q_OS_LINUX)
-    QString autostartPath = QDir::homePath() + "/.config/autostart/";
+    QString autostartPath = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation) + "/autostart/";
     QDir dir(autostartPath);
     QString desktopFilePath = autostartPath + QApplication::applicationName() + ".desktop";
     QFile desktopFile(desktopFilePath);
@@ -291,13 +414,53 @@ bool Utils::credentialCheck(const QString &username, const QString &password)
     return true;
 }
 
+void Utils::clearClientData(const QString &profileId)
+{
+    QFile::remove(getClientDataPath(profileId));
+}
+
+QString Utils::getClientDataPath(const QString &profileId)
+{
+    QString defaultPath = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    QDir dir(defaultPath);
+    if (!dir.exists())
+    {
+        dir.mkpath(".");
+    }
+
+    QDir profileDir(dir.filePath("profiles/" + profileId));
+    if (!profileDir.exists())
+    {
+        profileDir.mkpath(".");
+    }
+
+    QFile clientDataFile(profileDir.filePath("client-data.json"));
+    if (!clientDataFile.exists() && clientDataFile.open(QIODevice::WriteOnly))
+    {
+        clientDataFile.write("{}");
+        clientDataFile.close();
+    }
+
+    return profileDir.filePath("client-data.json");
+}
+
+QString Utils::getLogFilePath()
+{
+    QString logPath = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    QDir logDir(logPath);
+    if (!logDir.exists())
+    {
+        logDir.mkpath(".");
+    }
+    return logDir.filePath("zjuconnect.log");
+}
+
 void Utils::resetDefaultSettings(QSettings& settings)
 {
     settings.setValue("Credential/Username", "");
     settings.setValue("Credential/Password", "");
     settings.setValue("Credential/TOTPSecret", "");
 
-    settings.setValue("Common/AutoStart", false);
     settings.setValue("Common/ConnectAfterStart", false);
     settings.setValue("Common/CheckUpdateAfterStart", false);
     settings.setValue("Common/AutoSetProxy", false);
@@ -306,23 +469,31 @@ void Utils::resetDefaultSettings(QSettings& settings)
     settings.setValue("Common/SystemProxyBypass", "");
 
 
-    settings.setValue("ZJUConnect/ServerAddress", "vpn.hitsz.edu.cn");
+    settings.setValue("ZJUConnect/ServerAddress", "trust.hitsz.edu.cn");
     settings.setValue("ZJUConnect/ServerPort", 443);
     settings.setValue("ZJUConnect/DNS", "");
     settings.setValue("ZJUConnect/DNSAuto", true);
     settings.setValue("ZJUConnect/SecondaryDNS", "");
     settings.setValue("ZJUConnect/DNSTTL", 3600);
-    settings.setValue("ZJUConnect/Socks5Port", 11080);
-    settings.setValue("ZJUConnect/HttpPort", 11081);
+    settings.setValue("ZJUConnect/SOCKS5Port", 11080);
+    settings.setValue("ZJUConnect/HTTPPort", 11081);
     settings.setValue("ZJUConnect/ShadowsocksURL", "");
     settings.setValue("ZJUConnect/DialDirectProxy", "");
+    settings.setValue("ZJUConnect/UpdateBestNodesInterval", 300);
 
+    settings.setValue("ZJUConnect/Protocol", "atrust");
+    settings.setValue("ZJUConnect/LoginDomain", "hitcas");
+    settings.setValue("ZJUConnect/AuthType", "cas");
+    settings.setValue("ZJUConnect/LoginURL", "");
+    settings.setValue("ZJUConnect/PhoneCountryCode", "86");
+    settings.setValue("ZJUConnect/PhoneNumber", "");
 
     settings.setValue("ZJUConnect/MultiLine", false);
     settings.setValue("ZJUConnect/KeepAlive", false);
+    settings.setValue("ZJUConnect/KeepAliveURL", "");
     settings.setValue("ZJUConnect/OutsideAccess", false);
 
-    settings.setValue("ZJUConnect/SkipDomainResource", true);
+    settings.setValue("ZJUConnect/SkipDomainResource", false);
     settings.setValue("ZJUConnect/DisableServerConfig", false);
     settings.setValue("ZJUConnect/ProxyAll", false);
 
@@ -330,13 +501,15 @@ void Utils::resetDefaultSettings(QSettings& settings)
     settings.setValue("ZJUConnect/ZJUDefault", false);
     settings.setValue("ZJUConnect/Debug", false);
 
-    settings.setValue("ZJUConnect/TunMode", false);
+    settings.setValue("ZJUConnect/TUNMode", false);
     settings.setValue("ZJUConnect/AddRoute", false);
     settings.setValue("ZJUConnect/DNSHijack", false);
+    settings.setValue("ZJUConnect/FakeIP", false);
+    settings.setValue("ZJUConnect/TCPTunnelMode", false);
 
 
-    settings.setValue("ZJUConnect/TcpPortForwarding", "");
-    settings.setValue("ZJUConnect/UdpPortForwarding", "");
+    settings.setValue("ZJUConnect/TCPPortForwarding", "");
+    settings.setValue("ZJUConnect/UDPPortForwarding", "");
     settings.setValue("ZJUConnect/CustomDNS", "");
     settings.setValue("ZJUConnect/CustomProxyDomain", "");
     settings.setValue("ZJUConnect/ExtraArguments", "");

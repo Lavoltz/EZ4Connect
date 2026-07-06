@@ -1,4 +1,3 @@
-#include <QStandardPaths>
 #include <QMessageBox>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -6,32 +5,34 @@
 #include <QNetworkInterface>
 #include <QClipboard>
 #include <QDesktopServices>
+#include <QFileInfo>
+#include <QCoreApplication>
+#include <QActionGroup>
+#include <QInputDialog>
 
 #include "mainwindow.h"
 
-#include <set>
-
 #include "ui_mainwindow.h"
-#include "zjuconnectcontroller/zjuconnectcontroller.h"
 #include "utils/utils.h"
-
+#include "zjuconnectcontroller/zjuconnectcontroller.h"
 
 MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
     ui(new Ui::MainWindow)
 {
-    zjuConnectController = nullptr;
-
-    process = new QProcess(this);
-    processForL2tp = new QProcess(this);
-    processForL2tpCheck = new QProcess(this);
-    processForWebLogin = new QProcess(this);
-    settings = new QSettings(
-        QStandardPaths::writableLocation(QStandardPaths::ConfigLocation) + "/config.ini",
-        QSettings::IniFormat
-    );
-    l2tpCheckTimer = nullptr;
-    diagnosisContext = nullptr;
+    profileManager = new ProfileManager();
+    const QString overrideConfigPath = Utils::getArgValue(QCoreApplication::arguments(), "--config-path");
+    if (overrideConfigPath.isEmpty())
+    {
+        profileManager = new ProfileManager();
+        currentProfileId = profileManager->activeProfile();
+        settings = new QSettings(profileManager->profilePath(currentProfileId), QSettings::IniFormat);
+    }
+    else
+    {
+        currentProfileId = "custom";
+        settings = new QSettings(overrideConfigPath, QSettings::IniFormat);
+    }
 
     upgradeSettings();
 
@@ -41,6 +42,8 @@ MainWindow::MainWindow(QWidget *parent) :
     zjuConnectError = ZJU_ERROR::NONE;
 
     ui->setupUi(this);
+    setupTrayIcon();
+    setupProfileMenu();
 
     setWindowIcon(QIcon(QPixmap(":/resource/icon.png").scaled(
         512, 512, Qt::KeepAspectRatio, Qt::SmoothTransformation
@@ -54,64 +57,42 @@ MainWindow::MainWindow(QWidget *parent) :
 	versionInfo.core_latest = "正在检查";
     updateVersionInfo();
 
-    // 系统托盘
-    trayIcon = new QSystemTrayIcon(this);
-    trayIcon->setIcon(QIcon(QPixmap(":/resource/icon.png").scaled(
-        512, 512, Qt::KeepAspectRatio, Qt::SmoothTransformation
-    )));
-    trayIcon->setVisible(true);
-    trayIcon->setToolTip(QApplication::applicationName());
-    connect(trayIcon, &QSystemTrayIcon::activated, this, [&](QSystemTrayIcon::ActivationReason reason)
-    {
-        switch (reason)
-        {
-            case QSystemTrayIcon::Context:
-                trayMenu->exec(QCursor::pos());
-                break;
-            default:
-                show();
-                setWindowState(Qt::WindowState::WindowActive);
-        }
-    });
-    trayIcon->show();
-
-    trayShowAction = new QAction("显示", this);
-    trayCloseAction = new QAction("退出", this);
-    trayMenu = new QMenu(this);
-    trayMenu->addAction(trayShowAction);
-    trayMenu->addAction(trayCloseAction);
-    connect(trayShowAction, &QAction::triggered, this, [&]()
-    {
-        show();
-        setWindowState(Qt::WindowState::WindowActive);
-    });
-    connect(trayCloseAction, &QAction::triggered, this, [&]()
-    {
-        QApplication::quit();
-    });
 
     // 文件-退出
-    connect(ui->exitAction, &QAction::triggered,
-            [&]()
-            {
-                QApplication::quit();
-            });
+    connect(ui->exitAction, &QAction::triggered, this, &MainWindow::gracefullyQuit);
 
     // 文件-设置
     connect(ui->settingAction, &QAction::triggered, this,
             [&]()
             {
-                settingWindow = new SettingWindow(this, settings);
+                settingWindow = new SettingWindow(this, settings, currentProfileId);
                 settingWindow->show();
             });
 
-    // 帮助-清除系统代理
+    // 文件-打开日志文件
+    connect(ui->openLogAction, &QAction::triggered, this,
+            [&]()
+            {
+                QString logFilePath = Utils::getLogFilePath();
+                QFileInfo logFileInfo(logFilePath);
+                
+                if (logFileInfo.exists())
+                {
+                    QDesktopServices::openUrl(QUrl::fromLocalFile(logFilePath));
+                }
+                else
+                {
+                    QMessageBox::information(this, "日志文件", "日志文件还未生成，请先启动 VPN 连接。");
+                }
+            });
+
+    // 文件-清除系统代理
     connect(ui->disableProxyAction, &QAction::triggered,
             [&]()
             {
                 QMessageBox messageBox(this);
-                messageBox.setWindowTitle("清除系统代理");
-                messageBox.setText("是否清除系统代理？");
+                messageBox.setWindowTitle("禁用系统代理");
+                messageBox.setText("是否禁用系统代理？");
 
                 messageBox.addButton(QMessageBox::Yes)->setText("是");
                 messageBox.addButton(QMessageBox::No)->setText("否");
@@ -131,7 +112,28 @@ MainWindow::MainWindow(QWidget *parent) :
                     Utils::clearSystemProxy();
                 }
 
-                addLog("已清除系统代理设置");
+                addLog("已禁用系统代理设置");
+            });
+
+    // 文件-清理登录数据
+    connect(ui->clearClientDataAction, &QAction::triggered, this,
+            [&]()
+            {
+                QMessageBox messageBox(this);
+                messageBox.setWindowTitle("清理登录缓存");
+                messageBox.setText("是否清理登录缓存？");
+
+                messageBox.addButton(QMessageBox::Yes)->setText("是");
+                messageBox.addButton(QMessageBox::No)->setText("否");
+                messageBox.setDefaultButton(QMessageBox::Yes);
+
+                if (messageBox.exec() == QMessageBox::No)
+                {
+                    return;
+                }
+
+                Utils::clearClientData(currentProfileId);
+                addLog("已清理登录缓存");
             });
 
     // 帮助-检查更新
@@ -139,6 +141,13 @@ MainWindow::MainWindow(QWidget *parent) :
             [&]()
             {
                 checkUpdate();
+            });
+
+    // 帮助-项目主页
+    connect(ui->projectAction, &QAction::triggered,
+            [&]()
+            {
+                QDesktopServices::openUrl(QUrl("https://github.com/" + Utils::REPO_NAME));
             });
 
     // 帮助-关于本软件
@@ -162,9 +171,18 @@ MainWindow::MainWindow(QWidget *parent) :
 		    {
 		        if (isFirstTimeSetMode)
 		        {
-		            isFirstTimeSetMode = false;
-		            if (settings->value("Common/ConnectAfterStart", false).toBool())
-		            {
+                    isFirstTimeSetMode = false;
+                    bool shouldConnect = settings->value("Common/ConnectAfterStart", false).toBool();
+                    for (const QString &arg : qApp->arguments())
+                    {
+                        if (arg == "--connect")
+                        {
+                            shouldConnect = true;
+                            break;
+                        }
+                    }
+                    if (shouldConnect)
+                    {
 		                ui->pushButton1->click();
 		            }
 		        }
@@ -276,12 +294,43 @@ MainWindow::MainWindow(QWidget *parent) :
 		versionInfo.core_latest = "已禁用";
 		updateVersionInfo();
     }
+
+    if (!profileManager->silentStartEnabled())
+    {
+        show();
+    }
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
-    event->ignore();
-    hide();
+    if (isZjuConnectLinked)
+    {
+        event->ignore();
+        hide();
+        showNotification("EZ4Connect", "程序已最小化到系统托盘，单击图标可恢复窗口。", QSystemTrayIcon::MessageIcon::Information);
+    }
+    else
+    {
+        event->accept();
+    }
+}
+
+void MainWindow::changeEvent(QEvent *event)
+{
+    if (event->type() == QEvent::WindowStateChange)
+    {
+        QWindowStateChangeEvent *stateChangeEvent = static_cast<QWindowStateChangeEvent *>(event);
+        if (windowState().testFlag(Qt::WindowMinimized) == true && !(stateChangeEvent->oldState() & Qt::WindowMinimized))
+        {
+            event->ignore();
+            hide();
+            showNotification("EZ4Connect", "程序已最小化到系统托盘，单击图标可恢复窗口。", QSystemTrayIcon::MessageIcon::Information);
+        }
+    }
+    else
+    {
+        event->accept();
+    }
 }
 
 void MainWindow::addLog(const QString &log)
@@ -296,7 +345,333 @@ void MainWindow::clearLog()
     ui->logPlainTextEdit->appendPlainText(
         "欢迎使用 " + QApplication::applicationDisplayName() + "\n"
         "当前版本：" + QApplication::applicationVersion() + "\n"
-        "系统版本：" + QSysInfo::prettyProductName());
+        "系统版本：" + QSysInfo::prettyProductName() + "\n"
+        "当前配置：" + (currentProfileId.isEmpty() ? "默认" : currentProfileId) + "\n"
+        "配置路径：" + settings->fileName() + "\n");
+}
+
+void MainWindow::resetZjuConnectUi()
+{
+    isZjuConnectLinked = false;
+    zjuConnectError = ZJU_ERROR::NONE;
+    ui->pushButton1->setText("连接服务器");
+    trayConnectAction->setText("连接服务器");
+    ui->pushButton2->setText("设置系统代理");
+    ui->pushButton2->hide();
+}
+
+void MainWindow::setupTrayIcon()
+{
+    // 系统托盘
+    trayIcon = new QSystemTrayIcon(this);
+    trayIcon->setIcon(
+        QIcon(QPixmap(":/resource/icon.png").scaled(512, 512, Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+    trayIcon->setVisible(true);
+    trayIcon->setToolTip(QApplication::applicationName());
+    connect(trayIcon, &QSystemTrayIcon::activated, this, [&](QSystemTrayIcon::ActivationReason reason) {
+        switch (reason)
+        {
+        case QSystemTrayIcon::Context:
+            trayMenu->popup(QCursor::pos());
+            break;
+        default:
+            if (isHidden())
+            {
+                show();
+            }
+            setWindowState(Qt::WindowState::WindowActive);
+            setFocus();
+            break;
+        }
+    });
+    trayIcon->show();
+
+    trayConnectAction = new QAction("连接服务器", this);
+    trayProfileMenu = new QMenu("配置选择", this);
+    trayShowAction = new QAction("显示主界面", this);
+    trayCloseAction = new QAction("退出 " + QApplication::applicationName(), this);
+    trayMenu = new QMenu(this);
+    trayMenu->addAction(trayConnectAction);
+    trayMenu->addSeparator();
+    trayMenu->addMenu(trayProfileMenu);
+    trayMenu->addSeparator();
+    trayMenu->addAction(trayShowAction);
+    trayMenu->addAction(trayCloseAction);
+    connect(trayConnectAction, &QAction::triggered, this, [&]() { ui->pushButton1->click(); });
+    connect(trayShowAction, &QAction::triggered, this, [&]() {
+        show();
+        setWindowState(Qt::WindowState::WindowActive);
+        setFocus();
+    });
+    connect(trayCloseAction, &QAction::triggered, this, &MainWindow::gracefullyQuit);
+}
+
+void MainWindow::setupProfileMenu()
+{
+    // 务必在 setupTrayIcon 之后调用，以确保 trayProfileMenu 已正确初始化
+    if (profileManager == nullptr)
+    {
+        ui->profileMenu->setEnabled(false);
+        return;
+    }
+
+    newProfileAction = ui->profileMenu->addAction("新建配置");
+    renameProfileAction = ui->profileMenu->addAction("重命名当前配置");
+    deleteProfileAction = ui->profileMenu->addAction("删除当前配置");
+    ui->profileMenu->addSeparator();
+
+    connect(newProfileAction, &QAction::triggered, this, &MainWindow::createProfile);
+    connect(renameProfileAction, &QAction::triggered, this, &MainWindow::renameCurrentProfile);
+    connect(deleteProfileAction, &QAction::triggered, this, &MainWindow::deleteCurrentProfile);
+
+    refreshProfileMenu();
+}
+
+void MainWindow::refreshProfileMenu()
+{
+    if (profileManager == nullptr)
+    {
+        return;
+    }
+
+    const QList<QAction *> actions = ui->profileMenu->actions();
+    bool remove = false;
+    for (QAction *action : actions)
+    {
+        if (action == newProfileAction || action == renameProfileAction || action == deleteProfileAction)
+        {
+            continue;
+        }
+        if (action->isSeparator())
+        {
+            remove = true;
+            continue;
+        }
+        if (remove)
+        {
+            ui->profileMenu->removeAction(action);
+            delete action;
+        }
+    }
+
+    QActionGroup *switchGroup = new QActionGroup(ui->profileMenu);
+    QActionGroup *traySwitchGroup = nullptr;
+
+    if (trayProfileMenu != nullptr)
+    {
+        trayProfileMenu->clear();
+        traySwitchGroup = new QActionGroup(trayProfileMenu);
+        traySwitchGroup->setExclusive(true);
+    }
+
+    switchGroup->setExclusive(true);
+    QAction *action = ui->profileMenu->addAction("默认");
+    action->setCheckable(true);
+    action->setChecked(currentProfileId.isEmpty());
+    switchGroup->addAction(action);
+    connect(action, &QAction::triggered, this, [this]()
+    {
+        switchProfile("");
+    });
+    if (trayProfileMenu != nullptr)
+    {
+        QAction *trayAction = trayProfileMenu->addAction("默认");
+        trayAction->setCheckable(true);
+        trayAction->setChecked(currentProfileId.isEmpty());
+        traySwitchGroup->addAction(trayAction);
+        connect(trayAction, &QAction::triggered, this, [this]()
+        {
+            switchProfile("");
+        });
+    }
+
+    for (const QString &profileId : profileManager->listProfiles())
+    {
+        QAction *action = ui->profileMenu->addAction(profileId);
+        action->setCheckable(true);
+        action->setChecked(profileId == currentProfileId);
+        switchGroup->addAction(action);
+        connect(action, &QAction::triggered, this, [this, profileId]()
+        {
+            switchProfile(profileId);
+        });
+
+        if (trayProfileMenu != nullptr)
+        {
+            QAction *trayAction = trayProfileMenu->addAction(profileId);
+            trayAction->setCheckable(true);
+            trayAction->setChecked(profileId == currentProfileId);
+            traySwitchGroup->addAction(trayAction);
+            connect(trayAction, &QAction::triggered, this, [this, profileId]()
+            {
+                switchProfile(profileId);
+            });
+        }
+    }
+
+    renameProfileAction->setEnabled(!currentProfileId.isEmpty());
+    deleteProfileAction->setEnabled(!currentProfileId.isEmpty());
+}
+
+bool MainWindow::switchProfile(const QString &profileId)
+{
+    if (profileManager == nullptr)
+    {
+        return false;
+    }
+
+    if (!QFileInfo::exists(profileManager->profilePath(profileId)))
+    {
+        refreshProfileMenu();
+        return false;
+    }
+
+    if (profileId == currentProfileId)
+    {
+        return true;
+    }
+
+    if (isZjuConnectLinked)
+    {
+        QMessageBox::warning(this, "切换失败", "请先断开 VPN 连接，再切换配置。");
+        refreshProfileMenu();
+        return false;
+    }
+
+    if (settingWindow != nullptr)
+    {
+        settingWindow->close();
+    }
+
+    settings->sync();
+    delete settings;
+    settings = new QSettings(profileManager->profilePath(profileId), QSettings::IniFormat);
+    currentProfileId = profileId;
+    profileManager->setActiveProfile(currentProfileId);
+
+    upgradeSettings();
+    updateVersionInfo();
+    resetZjuConnectUi();
+    clearLog();
+    refreshProfileMenu();
+
+    addLog("已切换到配置：" + currentProfileId);
+    return true;
+}
+
+void MainWindow::createProfile()
+{
+    if (profileManager == nullptr)
+    {
+        return;
+    }
+
+    bool ok = false;
+    QString name = QInputDialog::getText(this, "新建配置", "请输入配置名称：\n（仅支持字母、数字、下划线）", QLineEdit::Normal, "", &ok);
+    if (!ok)
+    {
+        return;
+    }
+
+    const QString newProfileId = profileManager->createProfile(name, settings->fileName());
+    if (newProfileId.isEmpty())
+    {
+        QMessageBox::critical(this, "创建失败", "无法创建新配置。");
+        return;
+    }
+
+    switchProfile(newProfileId);
+}
+
+void MainWindow::renameCurrentProfile()
+{
+    if (profileManager == nullptr)
+    {
+        return;
+    }
+
+    bool ok = false;
+    QString name = QInputDialog::getText(this, "重命名配置", "请输入新配置名称：\n（仅支持字母、数字、下划线）", QLineEdit::Normal, currentProfileId, &ok);
+    if (!ok)
+    {
+        return;
+    }
+
+    const QString normalizedName = profileManager->normalizeProfileId(name);
+    if (normalizedName.isEmpty())
+    {
+        QMessageBox::warning(this, "重命名失败", "配置名称不能为空。");
+        return;
+    }
+    if (normalizedName == currentProfileId)
+    {
+        return;
+    }
+    if (isZjuConnectLinked)
+    {
+        QMessageBox::warning(this, "重命名失败", "请先断开 VPN 连接，再重命名配置。");
+        return;
+    }
+
+    settings->sync();
+    if (settingWindow != nullptr)
+    {
+        settingWindow->close();
+    }
+    if (!profileManager->renameProfile(currentProfileId, normalizedName))
+    {
+        QMessageBox::warning(this, "重命名失败", "目标配置已存在，或当前配置不可重命名。");
+        return;
+    }
+
+    currentProfileId = normalizedName;
+    profileManager->setActiveProfile(currentProfileId);
+    delete settings;
+    settings = new QSettings(profileManager->profilePath(currentProfileId), QSettings::IniFormat);
+    updateVersionInfo();
+    refreshProfileMenu();
+    clearLog();
+    addLog("当前配置已重命名为：" + currentProfileId);
+}
+
+void MainWindow::deleteCurrentProfile()
+{
+    if (profileManager == nullptr)
+    {
+        return;
+    }
+
+    if (currentProfileId.isEmpty())
+    {
+        QMessageBox::warning(this, "删除失败", "默认配置不可删除。");
+        return;
+    }
+
+    QMessageBox messageBox(this);
+    messageBox.setWindowTitle("删除配置");
+    messageBox.setText("确认删除当前配置 \"" + currentProfileId + "\" 吗？");
+    messageBox.addButton(QMessageBox::Yes)->setText("是");
+    messageBox.addButton(QMessageBox::No)->setText("否");
+    messageBox.setDefaultButton(QMessageBox::No);
+    if (messageBox.exec() != QMessageBox::Yes)
+    {
+        return;
+    }
+
+    const QString removedProfileId = currentProfileId;
+    if (!switchProfile(""))
+    {
+        return;
+    }
+
+    if (!profileManager->removeProfile(removedProfileId))
+    {
+        QMessageBox::warning(this, "删除失败", "无法删除该配置文件。");
+        return;
+    }
+
+    refreshProfileMenu();
+    addLog("已删除配置：" + removedProfileId);
 }
 
 void MainWindow::checkUpdate()
@@ -325,6 +700,14 @@ void MainWindow::upgradeSettings()
     {
         Utils::resetDefaultSettings(*settings);
     }
+    else if (configVersion == 4)
+    {
+        settings->setValue("ZJUConnect/Protocol", "easyconnect");
+    }
+    else if (configVersion == 6)
+    {
+        profileManager->setAutoStartEnabled(settings->value("Common/AutoStart", false).toBool());
+    }
     else if (configVersion < Utils::CONFIG_VERSION)
     {
         QMessageBox msgBox;
@@ -350,6 +733,7 @@ void MainWindow::updateVersionInfo()
 	ui->versionLabel->setText(
 		"UI 版本：" + versionInfo.ui_version + " 最新：" + versionInfo.ui_latest + "\n"
 		"核心版本：" + versionInfo.core_version + " 最新：" + versionInfo.core_latest + "\n"
+        "当前配置：" + (currentProfileId.isEmpty() ? "默认" : currentProfileId)
 	);
 }
 
@@ -388,8 +772,32 @@ void MainWindow::cleanUpWhenQuit()
     }
 }
 
+void MainWindow::gracefullyQuit()
+{
+    if (isZjuConnectLinked)
+    {
+        connect(zjuConnectController, &ZjuConnectController::finished, qApp, QApplication::quit);
+        ui->pushButton1->click();
+    }
+    else
+    {
+        qApp->quit();
+    }
+}
+
 MainWindow::~MainWindow()
 {
+    if (settings != nullptr)
+    {
+        settings->sync();
+        delete settings;
+    }
+
+    if (profileManager != nullptr)
+    {
+        delete profileManager;
+    }
+
     if (zjuConnectController != nullptr)
     {
         disconnect(zjuConnectController, &ZjuConnectController::finished, nullptr, nullptr);

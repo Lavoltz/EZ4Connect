@@ -26,8 +26,10 @@ find_package(Qt6 COMPONENTS
     Network
     Svg
     Core5Compat
+    WebEngineWidgets
     REQUIRED
 )
+
 
 set(SOURCE_FILES
     main.cpp
@@ -37,11 +39,19 @@ set(SOURCE_FILES
     extrasettingwindow/extrasettingwindow.cpp
     settingwindow/settingwindow.cpp
     loginwindow/loginwindow.cpp
+    sudowindow/sudowindow.cpp
+    ssologinwebview/ssologinwebview.cpp
+    authinfowindow/authinfowindow.cpp
+    graphcaptchawindow/graphcaptchawindow.cpp
+    graphcaptchawindow/captchacanvas.cpp
     utils/utils.cpp
+    utils/profilemanager.cpp
     utils/proxysettings.cpp
     utils/coreversion.cpp
     resource.qrc
 )
+
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 if (WIN32)
     message("Building for Windows")
@@ -66,6 +76,9 @@ elseif(APPLE)
         ${SOURCE_FILES}
         ${app_icon_macos}
     )
+
+    set_target_properties(${PROJECT_NAME}
+        PROPERTIES MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/resource/Info.plist")
 else()
     add_executable(${PROJECT_NAME}
         ${SOURCE_FILES}
@@ -88,6 +101,7 @@ target_link_libraries(${PROJECT_NAME}
         Qt::Network
         Qt::Svg
         Qt::Core5Compat
+        Qt::WebEngineWidgets
         SingleApplication::SingleApplication
         ${PLATFORM_LIBS}
 )

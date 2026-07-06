@@ -7,11 +7,30 @@
     <x>0</x>
     <y>0</y>
     <width>600</width>
-    <height>300</height>
+    <height>325</height>
    </rect>
   </property>
   <widget class="QWidget" name="centralWidget">
    <layout class="QGridLayout" name="gridLayout">
+    <item row="1" column="1" colspan="3">
+     <widget class="QLabel" name="versionLabel">
+      <property name="text">
+       <string>Line 1
+Line 2
+Line3</string>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignmentFlag::AlignCenter</set>
+      </property>
+     </widget>
+    </item>
+    <item row="4" column="3">
+     <widget class="QPushButton" name="pushButton2">
+      <property name="text">
+       <string>设置系统代理</string>
+      </property>
+     </widget>
+    </item>
     <item row="0" column="1" colspan="3">
      <widget class="QLabel" name="applicationNameLabel">
       <property name="sizePolicy">
@@ -36,21 +55,15 @@
       </property>
      </widget>
     </item>
-    <item row="1" column="1" colspan="3">
-     <widget class="QLabel" name="versionLabel">
-      <property name="sizePolicy">
-       <sizepolicy hsizetype="Preferred" vsizetype="Maximum">
-        <horstretch>0</horstretch>
-        <verstretch>0</verstretch>
-       </sizepolicy>
-      </property>
+    <item row="2" column="1" colspan="3">
+     <widget class="QLabel" name="accountLabel">
       <property name="text">
-       <string>Line 1
-Line 2
-</string>
-      </property>
-      <property name="alignment">
-       <set>Qt::AlignmentFlag::AlignCenter</set>
+       <string>
+你知道吗？
+本软件的内核是 zju-connect ，
+可以连接任何兼容它的服务器！
+
+如遇问题欢迎加入 QQ 群 1037726410 反馈。</string>
       </property>
      </widget>
     </item>
@@ -70,16 +83,6 @@ Line 2
       </property>
      </widget>
     </item>
-    <item row="4" column="2">
-     <spacer name="horizontalSpacer_2">
-      <property name="orientation">
-       <enum>Qt::Orientation::Horizontal</enum>
-      </property>
-      <property name="sizeType">
-       <enum>QSizePolicy::Policy::Minimum</enum>
-      </property>
-     </spacer>
-    </item>
     <item row="4" column="1">
      <widget class="QPushButton" name="pushButton1">
       <property name="text">
@@ -97,36 +100,17 @@ Line 2
       </property>
      </widget>
     </item>
-    <item row="4" column="3">
-     <widget class="QPushButton" name="pushButton2">
-      <property name="text">
-       <string>设置系统代理</string>
-      </property>
-     </widget>
-    </item>
-    <item row="2" column="1" colspan="3">
-     <widget class="QLabel" name="accountLabel">
-      <property name="text">
-       <string>
-你知道吗？
-本软件的内核是 zju-connect ，
-可以连接任何兼容它的服务器！
-
-如遇问题欢迎加入 HITSZ OSA 反馈。</string>
-      </property>
-     </widget>
-    </item>
-    <item row="3" column="1" colspan="3">
-     <spacer name="horizontalSpacer_3">
+    <item row="4" column="2">
+     <spacer name="horizontalSpacer_2">
       <property name="orientation">
        <enum>Qt::Orientation::Horizontal</enum>
       </property>
       <property name="sizeType">
-       <enum>QSizePolicy::Policy::Preferred</enum>
+       <enum>QSizePolicy::Policy::Minimum</enum>
       </property>
       <property name="sizeHint" stdset="0">
        <size>
-        <width>220</width>
+        <width>0</width>
         <height>0</height>
        </size>
       </property>
@@ -140,7 +124,7 @@ Line 2
      <x>0</x>
      <y>0</y>
      <width>600</width>
-     <height>33</height>
+     <height>31</height>
     </rect>
    </property>
    <property name="styleSheet">
@@ -157,18 +141,27 @@ Line 2
     <property name="title">
      <string>帮助</string>
     </property>
-    <addaction name="disableProxyAction"/>
     <addaction name="checkUpdateAction"/>
+    <addaction name="projectAction"/>
     <addaction name="aboutAction"/>
    </widget>
    <widget class="QMenu" name="fileMenu">
     <property name="title">
-     <string>功能</string>
+     <string>文件</string>
     </property>
+    <addaction name="disableProxyAction"/>
+    <addaction name="clearClientDataAction"/>
+    <addaction name="openLogAction"/>
     <addaction name="settingAction"/>
     <addaction name="exitAction"/>
    </widget>
+   <widget class="QMenu" name="profileMenu">
+    <property name="title">
+     <string>配置</string>
+    </property>
+   </widget>
    <addaction name="fileMenu"/>
+   <addaction name="profileMenu"/>
    <addaction name="helpMenu"/>
   </widget>
   <action name="aboutAction">
@@ -178,20 +171,29 @@ Line 2
    <property name="toolTip">
     <string>关于本软件</string>
    </property>
+   <property name="menuRole">
+    <enum>QAction::MenuRole::AboutRole</enum>
+   </property>
   </action>
   <action name="exitAction">
    <property name="text">
     <string>退出</string>
+   </property>
+   <property name="menuRole">
+    <enum>QAction::MenuRole::QuitRole</enum>
    </property>
   </action>
   <action name="settingAction">
    <property name="text">
     <string>设置</string>
    </property>
+   <property name="menuRole">
+    <enum>QAction::MenuRole::PreferencesRole</enum>
+   </property>
   </action>
   <action name="disableProxyAction">
    <property name="text">
-    <string>清除系统代理</string>
+    <string>禁用系统代理</string>
    </property>
   </action>
   <action name="action">
@@ -202,6 +204,24 @@ Line 2
   <action name="checkUpdateAction">
    <property name="text">
     <string>检查更新</string>
+   </property>
+  </action>
+  <action name="projectAction">
+   <property name="text">
+    <string>项目主页</string>
+   </property>
+  </action>
+  <action name="openLogAction">
+   <property name="text">
+    <string>打开日志文件</string>
+   </property>
+   <property name="toolTip">
+    <string>打开核心程序的日志文件</string>
+   </property>
+  </action>
+  <action name="clearClientDataAction">
+   <property name="text">
+    <string>清理登录缓存</string>
    </property>
   </action>
  </widget>

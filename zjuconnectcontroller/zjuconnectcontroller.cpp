@@ -1,15 +1,66 @@
 #include "zjuconnectcontroller.h"
-#include "../utils/utils.h"
+#include "mainwindow.h"
+#include "utils/utils.h"
+#include <qcontainerfwd.h>
+#include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QStandardPaths>
 
-ZjuConnectController::ZjuConnectController()
+ZjuConnectController::ZjuConnectController(QWidget* parent) : QObject(parent)
 {
     zjuConnectProcess = new QProcess(this);
+
+    // 初始化日志文件
+    logFile = new QFile(Utils::getLogFilePath());
+    if (logFile->open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate))
+    {
+        logStream = new QTextStream(logFile);
+        logStream->setEncoding(QStringConverter::Utf8);
+        QString startMsg = "=== Log started at " + QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") +
+                           " with " + QApplication::applicationDisplayName() + " " + QApplication::applicationVersion() +
+                           " ===\n";
+        *logStream << startMsg;
+        logStream->flush();
+    }
 
     auto outputProcess = [&](const QString& output)
         {
             emit outputRead(output);
 
-            if (output.contains("Access is denied."))
+            // 写入日志文件
+            if (logStream != nullptr)
+            {
+                *logStream << output;
+                if (!output.endsWith('\n'))
+                {
+                    *logStream << '\n';
+                }
+                logStream->flush();
+            }
+
+            if (output.contains("SUDO_ASK_PASS"))
+            {
+                emit askSudoPass();
+            }
+            else if (output.contains("Graph check code saved to "))
+            {
+                emit graphCaptcha(graphFile);
+            }
+            else if (output.contains("Please enter the SMS verification code: ") || output.contains("Please enter your SMS code:"))
+            {
+                emit smsCode();
+            }
+            else if (output.contains("Please enter the callback url:"))
+            {
+                emit ssoAuth();
+            }
+            else if (output.contains("graph check code still required after second login attempt"))
+            {
+                emit error(ZJU_ERROR::CAPTCHA_FAILED);
+            }
+            else if (output.contains("Access is denied."))
             {
                 emit error(ZJU_ERROR::ACCESS_DENIED);
             }
@@ -17,7 +68,7 @@ ZjuConnectController::ZjuConnectController()
             {
                 emit error(ZJU_ERROR::LISTEN_FAILED);
             }
-            else if (output.contains("Invalid username or password!"))
+            else if (output.contains("Invalid username or password!") || output.contains("ticket is empty"))
             {
                 emit error(ZJU_ERROR::INVALID_DETAIL);
             }
@@ -28,6 +79,18 @@ ZjuConnectController::ZjuConnectController()
             else if (output.contains("Login failed") || output.contains("too many login failures"))
             {
                 emit error(ZJU_ERROR::OTHER_LOGIN_FAILED);
+            }
+            else if (output.contains("unexpected newline"))
+            {
+                emit error(ZJU_ERROR::INTERACTIVE_ERROR);
+            }
+            else if (output.contains("auth type/login domain combination not found"))
+            {
+                emit error(ZJU_ERROR::AUTH_NOT_AVAILABLE);
+            }
+            else if (output.contains("invalid SID") || output.contains("l3-tunnel tunnel auth failed:"))
+            {
+                emit error(ZJU_ERROR::AUTH_EXPIRED);
             }
             else if (output.contains("client setup error"))
             {
@@ -41,20 +104,24 @@ ZjuConnectController::ZjuConnectController()
 
     connect(zjuConnectProcess, &QProcess::readyReadStandardOutput, this, [&, outputProcess]()
     {
-        QString output = Utils::ConsoleOutputToQString(zjuConnectProcess->readAllStandardOutput());
+        QString output = Utils::consoleOutputToQString(zjuConnectProcess->readAllStandardOutput());
 
 		outputProcess(output);
     });
 
     connect(zjuConnectProcess, &QProcess::readyReadStandardError, this, [&, outputProcess]()
     {
-        QString output = Utils::ConsoleOutputToQString(zjuConnectProcess->readAllStandardError());
+        QString output = Utils::consoleOutputToQString(zjuConnectProcess->readAllStandardError());
 
 		outputProcess(output);
     });
 
     connect(zjuConnectProcess, &QProcess::errorOccurred, this, [&](QProcess::ProcessError err)
     {
+        if (stopRequested)
+        {
+            return;
+        }
         QString timeString = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
         QString errorString = zjuConnectProcess->errorString();
         emit outputRead(timeString + " 退出原因：" + errorString);
@@ -68,14 +135,69 @@ ZjuConnectController::ZjuConnectController()
 
     connect(zjuConnectProcess, &QProcess::finished, this, [&]()
     {
+        stopRequested = false;
+        QString timeString = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
+        emit outputRead(timeString + " 退出原因：" "进程已结束");
         emit finished();
     });
+
+
+    connect(qobject_cast<MainWindow *>(parent), &MainWindow::WriteToProcess, this,
+            [&](const QByteArray &data) { zjuConnectProcess->write(data); });
+}
+
+QString ZjuConnectController::copyCoreForAppImage(const QString &programPath)
+{
+#if defined(Q_OS_UNIX)
+    static QString cachedSourcePath;
+    static QString cachedTempPath;
+
+    if (!qEnvironmentVariableIsSet("APPIMAGE")) {
+        return programPath;
+    }
+
+    if (cachedSourcePath == programPath && !cachedTempPath.isEmpty() && QFileInfo::exists(cachedTempPath)) {
+        return cachedTempPath;
+    }
+
+    const QFileInfo sourceInfo(programPath);
+    if (!sourceInfo.exists() || !sourceInfo.isFile()) {
+        return programPath;
+    }
+
+    const QString tempRoot = QStandardPaths::writableLocation(QStandardPaths::TempLocation)
+                             + "/EZ4Connect-" + QString::number(QCoreApplication::applicationPid());
+    QDir().mkpath(tempRoot);
+
+    const QString tempPath = tempRoot + "/" + sourceInfo.fileName();
+    if (QFileInfo::exists(tempPath)) {
+        QFile::remove(tempPath);
+    }
+
+    if (!QFile::copy(programPath, tempPath)) {
+        return programPath;
+    }
+
+    QFile::setPermissions(tempPath,
+                          QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner |
+                          QFileDevice::ReadGroup | QFileDevice::ExeGroup |
+                          QFileDevice::ReadOther | QFileDevice::ExeOther);
+    cachedSourcePath = programPath;
+    cachedTempPath = tempPath;
+    return tempPath;
+#else
+    return programPath;
+#endif
 }
 
 void ZjuConnectController::start(
     const QString& program,
+    const QString& protocol,
+    const QString& authType,
+    const QString& loginDomain,
     const QString& username,
     const QString& password,
+    const QString& phone,
     const QString& totpSecret,
     const QString& server,
     int port,
@@ -87,8 +209,10 @@ void ZjuConnectController::start(
     const QString& httpBind,
     const QString& shadowsocksUrl,
     const QString& dialDirectProxy,
+    int updateBestNodesInterval,
     bool disableMultiLine,
     bool disableKeepAlive,
+    const QString& keepAliveUrl,
     bool skipDomainResource,
     bool disableServerConfig,
     bool proxyAll,
@@ -98,14 +222,60 @@ void ZjuConnectController::start(
     bool tunMode,
     bool addRoute,
     bool dnsHijack,
+    bool fakeIp,
+    bool tcpTunnelMode,
     const QString& tcpPortForwarding,
     const QString& udpPortForwarding,
     const QString& customDNS,
     const QString& customProxyDomain,
-    const QString& extraArguments
+    const QString& certFile,
+    const QString& certPassword,
+    const QString& extraArguments,
+    const QString& profileId
 )
 {
     QStringList args;
+
+    if (!protocol.isEmpty())
+    {
+        args.append("-protocol");
+        args.append(protocol);
+    }
+
+    if (!authType.isEmpty())
+    {
+        args.append("-auth-type");
+        args.append("auth/" + authType);
+    }
+
+    if (protocol == "atrust")
+    {
+        // 图形验证码文件路径
+        if (tempDir == nullptr)
+        {
+            tempDir = new QTemporaryDir;
+            tempDir->setAutoRemove(true);
+        }
+        graphFile = tempDir->filePath("graph.jpg");
+        args.append("-graph-code-file");
+        args.append(graphFile);
+
+        // 存放 Client Data
+        args.append("-client-data-file");
+        args.append(Utils::getClientDataPath(profileId));
+    }
+
+    if (!phone.isEmpty())
+    {
+        args.append("-phone");
+        args.append(phone);
+    }
+
+    if (!loginDomain.isEmpty())
+    {
+        args.append("-login-domain");
+        args.append(loginDomain);
+    }
 
     if (!server.isEmpty())
     {
@@ -154,6 +324,12 @@ void ZjuConnectController::start(
         args.append("-disable-keep-alive");
     }
 
+    if (!keepAliveUrl.isEmpty())
+    {
+        args.append("-keep-alive-url");
+        args.append(keepAliveUrl);
+    }
+
     if (disableZjuConfig)
     {
         args.append("-disable-zju-config");
@@ -186,12 +362,21 @@ void ZjuConnectController::start(
         if (dnsHijack)
         {
             args.append("-dns-hijack");
+            if (fakeIp)
+            {
+                args.append("-fake-ip");
+            }
         }
 
         if (addRoute)
         {
             args.append("-add-route");
         }
+    }
+
+    if (tcpTunnelMode)
+    {
+        args.append("-tcp-tunnel-mode");
     }
 
     if (debugDump)
@@ -221,6 +406,12 @@ void ZjuConnectController::start(
     {
         args.append("-dial-direct-proxy");
         args.append(dialDirectProxy);
+    }
+
+    if (updateBestNodesInterval != 300)
+    {
+        args.append("-update-best-nodes-interval");
+        args.append(QString::number(updateBestNodesInterval));
     }
 
     if (!tcpPortForwarding.isEmpty())
@@ -255,10 +446,19 @@ void ZjuConnectController::start(
     QString timeString = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
     emit outputRead(timeString + " VPN 启动！参数：" + args.join(' '));
 
-    QStringList credentialList({
-            "-username", username,
-            "-password", password,
-        });
+    QStringList credentialList;
+
+    if (!username.isEmpty())
+    {
+        credentialList.append("-username");
+        credentialList.append(username);
+    }
+
+    if (!password.isEmpty())
+    {
+        credentialList.append("-password");
+        credentialList.append(password);
+    }
 
     if (!totpSecret.isEmpty())
     {
@@ -267,7 +467,38 @@ void ZjuConnectController::start(
         credentialList.append(totpSecret);
     }
 
-    zjuConnectProcess->start(program, credentialList + args);
+    if (!certFile.isEmpty())
+    {
+        emit outputRead(timeString + " 使用了证书文件");
+        args.append("-cert-file");
+        args.append(certFile);
+    }
+
+    if (!certPassword.isEmpty())
+    {
+        args.append("-cert-password");
+        args.append(certPassword);
+    }
+
+    QString programToStart = program;
+    QStringList finalArgs = credentialList + args;
+
+#if defined(Q_OS_UNIX)
+    if (tunMode && !Utils::isRunningAsAdmin())
+    {
+        programToStart = copyCoreForAppImage(programToStart);
+
+        QStringList sudoArgs;
+        sudoArgs << "-p" << "SUDO_ASK_PASS";
+        sudoArgs << "-S";
+        sudoArgs << programToStart << finalArgs;
+        programToStart = "sudo";
+        finalArgs = sudoArgs;
+        enteredSudoPassword = false;
+    }
+#endif
+
+    zjuConnectProcess->start(programToStart, finalArgs);
     zjuConnectProcess->waitForStarted();
     if (zjuConnectProcess->state() == QProcess::NotRunning)
     {
@@ -282,11 +513,38 @@ void ZjuConnectController::stop()
         return;
     }
 
-    zjuConnectProcess->kill();
-    zjuConnectProcess->waitForFinished();
+    if (!stopRequested)
+    {
+        stopRequested = true;
+        zjuConnectProcess->terminate();
+    }
+    else
+    {
+        zjuConnectProcess->kill();
+    }
 }
 
 ZjuConnectController::~ZjuConnectController()
 {
     stop();
+
+    // 关闭日志文件
+    if (logStream != nullptr)
+    {
+        QString endMsg = "=== Log ended at " + QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") + " ===\n";
+        *logStream << endMsg;
+        logStream->flush();
+        delete logStream;
+        logStream = nullptr;
+    }
+
+    if (logFile != nullptr)
+    {
+        if (logFile->isOpen())
+        {
+            logFile->close();
+        }
+        delete logFile;
+        logFile = nullptr;
+    }
 }

@@ -9,14 +9,14 @@
 
 namespace Utils
 {
-    const inline QString REPO_NAME("PageChen04/EZ4Connect");
+    const inline QString REPO_NAME("chenx-dust/EZ4Connect");
     const inline QString CORE_REPO_NAME("Mythologyli/zju-connect");
 
     const inline QString APP_NAME("EZ4Connect");
 
-    constexpr inline int CONFIG_VERSION = 4;
+    constexpr inline int CONFIG_VERSION = 8;
 
-    QString ConsoleOutputToQString(const QByteArray &byteArray);
+    QString consoleOutputToQString(const QByteArray &byteArray);
 
     void setWidgetFixedWhenHidden(QWidget *widget);
 
@@ -39,6 +39,18 @@ namespace Utils
     QString getCorePath();
 
     QString checkCoreVersion(QObject *parent);
+
+    bool isRunningAsAdmin();
+
+    bool relaunchAsAdmin();
+
+    void clearClientData(const QString &profileId);
+    
+    QString getClientDataPath(const QString &profileId);
+
+    QString getLogFilePath();
+
+    QString getArgValue(const QStringList &args, const QString &key);
 }
 
 #endif //UTILS_H

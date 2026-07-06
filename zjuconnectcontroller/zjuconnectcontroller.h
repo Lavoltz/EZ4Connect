@@ -12,7 +12,11 @@ enum class ZJU_ERROR
     ACCESS_DENIED,
     LISTEN_FAILED,
     CLIENT_FAILED,
+    CAPTCHA_FAILED,
     PROGRAM_NOT_FOUND,
+    INTERACTIVE_ERROR,
+    AUTH_NOT_AVAILABLE,
+    AUTH_EXPIRED,
     OTHER,
 };
 
@@ -21,14 +25,18 @@ class ZjuConnectController : public QObject
 Q_OBJECT
 
 public:
-    ZjuConnectController();
+    ZjuConnectController(QWidget* parent);
 
     ~ZjuConnectController() override;
 
     void start(
         const QString& program,
+        const QString& protocol,
+        const QString& authType,
+        const QString& loginDomain,
         const QString& username,
         const QString& password,
+        const QString& phone,
         const QString& totpSecret,
         const QString& server,
         int port,
@@ -40,8 +48,10 @@ public:
         const QString& httpBind,
         const QString& shadowsocksUrl,
         const QString& dialDirectProxy,
+        int updateBestNodesInterval,
         bool disableMultiLine,
         bool disableKeepAlive,
+        const QString& keepAliveUrl,
         bool skipDomainResource,
         bool disableServerConfig,
         bool proxyAll,
@@ -51,11 +61,16 @@ public:
         bool tunMode,
         bool addRoute,
         bool dnsHijack,
+        bool fakeIp,
+        bool tcpTunnelMode,
         const QString& tcpPortForwarding,
         const QString& udpPortForwarding,
         const QString& customDNS,
         const QString& customProxyDomain,
-        const QString& extraArguments
+        const QString& certFile,
+        const QString& certPassword,
+        const QString& extraArguments,
+        const QString& profileId
     );
 
     void stop();
@@ -67,11 +82,35 @@ signals:
 
     void outputRead(const QString &output);
 
+    void graphCaptcha(const QString &graphFile);
+
+    void smsCode();
+
+    void ssoAuth();
+
+    void askSudoPass();
+
     void finished();
 
+    void write(const QByteArray &data);
+
 private:
+    QString copyCoreForAppImage(const QString &programPath);
+
     QProcess *zjuConnectProcess;
 
+    QTemporaryDir *tempDir = nullptr;
+
+    QString graphFile;
+
+    QFile *logFile = nullptr;
+    QTextStream *logStream = nullptr;
+    bool stopRequested = false;
+
+public:
+    bool savedSudoPassword;
+    bool enteredSudoPassword;
+    QString sudoPassword;
 };
 
 #endif //ZJUCONNECTCONTROLLER_H

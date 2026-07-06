@@ -2,18 +2,20 @@
 
 *前身为 HITsz Connect for Windows*
 
-![Action](https://github.com/PageChen04/EZ4Connect/actions/workflows/build.yml/badge.svg)
-![Release](https://img.shields.io/github/v/release/PageChen04/EZ4Connect)
-![Downloads](https://img.shields.io/github/downloads/PageChen04/EZ4Connect/total)
-![License](https://img.shields.io/github/license/PageChen04/EZ4Connect)
+![Action](https://github.com/chenx-dust/EZ4Connect/actions/workflows/build.yml/badge.svg)
+![Release](https://img.shields.io/github/v/release/chenx-dust/EZ4Connect)
+![Downloads](https://img.shields.io/github/downloads/chenx-dust/EZ4Connect/total)
+![License](https://img.shields.io/github/license/chenx-dust/EZ4Connect)
 
 改进的 ZJU-Connect 图形界面
 
-欢迎加入 HITSZ 开源技术协会 [@hitszosa](https://github.com/hitszosa)
+## 🎉 现已正式提供 aTrust 支持
+
+如使用中遇到问题，可加入 ZJU-Connect 用户反馈 QQ 群 1037726410 交流。
 
 ## 使用方式
 
-1. 在本项目的 [Releases](https://github.com/PageChen04/EZ4Connect/releases) 页面下载最新版本：
+1. 在本项目的 [Releases](https://github.com/chenx-dust/EZ4Connect/releases) 页面下载最新版本：
 
 - **Windows 用户**：下载 `EZ4Connect-vX.X.X-windows-ARCH.zip` ，解压至同一目录下，双击运行 `EZ4Connect.exe` ；
   - 如果遇到缺少 DLL 等问题，请先下载安装 Microsoft Visual C++ 可再发行程序包版本（[x64](https://aka.ms/vs/17/release/vc_redist.x64.exe) | [arm64](https://aka.ms/vs/17/release/vc_redist.arm64.exe)），再运行程序；
@@ -29,25 +31,24 @@
 <img src="docs/main.png" width="600px">
 </div>
 
-2. 在 “功能”-“设置”-“通用” 页面中输入账号（一般为学号）和密码，点击 OK 保存登录信息；
+2. 在 “文件”-“设置”-“核心” 页面中设置好服务器地址；
 
 <div align="center">
-<img src="docs/config.png" width="400px">
+<img src="docs/proxy_setting.png" width="400px">
 </div>
 
-3. 在主界面中点击“连接服务器”。如果只需进行校园网页浏览，则选择“设置系统代理”后即可使用。
+3. 在 “文件”-“设置”-“认证” 页面中，选择对应的服务器类型，配置认证信息；
+
+> [!NOTE]
+> aTrust 服务器支持多种认证方式，如需选择请点击“获取认证方式”按钮。除非您十分了解登录信息，否则不建议手动配置。
+
+<div align="center">
+<img src="docs/auth_method.png" width="400px">
+</div>
+
+4. 在主界面中点击“连接服务器”。如果只需进行校园网页浏览，则选择“设置系统代理”后即可使用。
 
 如果需要配合 Clash / Mihomo 进行高级的分流操作，可以参见： [高级使用方式](docs/ADVANCED_USAGE.md)
-
-## 适配指南
-
-本项目为了便于构建专用于其他可以使用 ZJU-Connect 的学校（如：HITSZ）的版本，特别提供了适配指南。
-
-- 程序中引用的应用名称均来自头文件 `utils/utils.h` 中的 `Utils::APP_NAME` ，仓库由同个头文件中的 `Utils::REPO_NAME` 定义；
-- CI 配置 `build.yml` 中，`env.TARGET_NAME` 应当与 CMake 项目名称一致，`env.DISPLAY_NAME` 定义了编译结果的文件夹 / 应用名称；
-- 默认配置则规定于 `zjuconnectmode.cpp` 和 `settingwindow.cpp` 中。
-
-如有需要，可以自行修改适配。
 
 ## 路线图
 
@@ -71,3 +72,5 @@
 
 - [Mythologyli/ZJU-Connect-for-Windows](https://github.com/Mythologyli/ZJU-Connect-for-Windows)
 - [Mythologyli/zju-connect](https://github.com/Mythologyli/zju-connect)
+
+> 欢迎加入 HITSZ 开源技术协会 [@hitszosa](https://github.com/hitszosa)
